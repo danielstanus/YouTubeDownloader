@@ -1,6 +1,14 @@
-# YouTube Downloader Simple
+# YouTube Downloader Simple v1.0.0
 
 Una herramienta sencilla y potente para descargar videos de YouTube en formato audio (MP3 o calidad original) con una interfaz gráfica moderna.
+
+## 🚀 Versión v1.0.0 (Actual)
+Esta versión incluye:
+- Modo oscuro nativo forzado.
+- Interfaz mejorada con bordes definidos y feedback visual de foco.
+- Optimización de arranque (comprobación de FFmpeg en segundo plano).
+- Limpieza inteligente de URLs mediante Regex.
+- Soporte de User-Agent de Chrome para evitar bloqueos de YouTube.
 
 ## Características
 

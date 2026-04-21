@@ -16,10 +16,12 @@ import requests
 
 
 class YouTubeDownloader:
+    VERSION = "v1.0.0"
+
     def __init__(self, master):
 
         self.master = master
-        master.title("YouTube Downloader by Daniel Calin Stanus")
+        master.title(f"YouTube Downloader by Daniel Calin Stanus - {self.VERSION}")
         master.geometry("1200x720")
 
         self.center_window()
@@ -52,6 +54,10 @@ class YouTubeDownloader:
         # Container for Text area to simulate borders
         text_container = tk.Frame(main_frame, bg="#333333", padx=1, pady=1)
         text_container.pack(fill="x", pady=(0, 10))
+
+        # Add version label at bottom right of main frame
+        version_label = ttk.Label(main_frame, text=self.VERSION, font=("Helvetica", 8), foreground="#666666")
+        version_label.place(relx=1.0, rely=1.0, anchor="se", x=15, y=15)
 
         self.entrada_enlaces = tk.Text(
             text_container,
