@@ -24,16 +24,18 @@ class YouTubeDownloader:
 
         self.center_window()
 
-        # Apply Sun Valley theme
-        sv_ttk.set_theme("dark")  # Can be "dark" or "light"
+        # Force Dark Mode Theme
+        try:
+            sv_ttk.set_theme("dark")
+        except Exception as e:
+            print(f"Error applying theme in init: {e}")
 
         # Logging setup
         logging.basicConfig(filename='YouTube_Downloader_by_DS.log', level=logging.INFO,
                             format='%(asctime)s - %(levelname)s - %(message)s')
 
-        # sv_ttk.set_theme(darkdetect.theme())
-        # Check and install FFmpeg
-        self.check_and_install_ffmpeg()
+        # Check and install FFmpeg in a background thread to not block UI
+        threading.Thread(target=self.check_and_install_ffmpeg, daemon=True).start()
 
         # Create UI
         self.create_widgets()
@@ -47,12 +49,25 @@ class YouTubeDownloader:
         links_label = ttk.Label(main_frame, text="🔗 YouTube Links (one per line):", font=("Helvetica", 16))
         links_label.pack(anchor="w", pady=(0, 5))
 
+        # Container for Text area to simulate borders
+        text_container = tk.Frame(main_frame, bg="#333333", padx=1, pady=1)
+        text_container.pack(fill="x", pady=(0, 10))
+
         self.entrada_enlaces = tk.Text(
-            main_frame,
+            text_container,
             height=5,
-            font=("Consolas", 14)
+            font=("Consolas", 14),
+            bg="#1c1c1c",
+            fg="#ffffff",
+            insertbackground="white",
+            padx=10,
+            pady=10,
+            borderwidth=0,
+            highlightthickness=1,
+            highlightbackground="#333333",
+            highlightcolor="#0078d4"  # Windows blue color when focused
         )
-        self.entrada_enlaces.pack(fill="x", pady=(0, 10))
+        self.entrada_enlaces.pack(fill="x")
 
         # Download Folder Section
         folder_frame = ttk.Frame(main_frame)
@@ -297,66 +312,62 @@ class YouTubeDownloader:
         if os.name != 'nt':
             return  # Only for Windows
 
-        # Check existing FFmpeg installations
-        try:
-            subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True)
-            return  # FFmpeg is already installed and in PATH
-        except FileNotFoundError:
-            pass
-
-        # Check if FFmpeg exists in C:\ffmpeg
+        # Check existing FFmpeg installations - fast check first
         ffmpeg_path = r'C:\ffmpeg'
         ffmpeg_exe = os.path.join(ffmpeg_path, 'ffmpeg.exe')
+        
         if os.path.exists(ffmpeg_exe):
-            # Add to PATH
             self.add_to_path(ffmpeg_path)
             return
 
+        try:
+            # Quick check if it's already in PATH without launching a full process if possible
+            # but subprocess is the most reliable way
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, check=True)
+            return
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            pass
+
+        # If we get here, FFmpeg is missing. We need to install it.
+        # This part SHOULD be in the main thread or use .after() to create the window
+        self.master.after(0, self._show_ffmpeg_install_dialog)
+
+    def _show_ffmpeg_install_dialog(self):
+        ffmpeg_path = r'C:\ffmpeg'
         # Create a progress dialog
         progress_window = tk.Toplevel(self.master)
         progress_window.title("FFmpeg Installation")
         progress_window.geometry("300x150")
-        progress_window.grab_set()  # Make the window modal
-        progress_window.transient(self.master)  # Attach to main window
+        progress_window.grab_set()
+        progress_window.transient(self.master)
 
-        # Ensure window is drawn before long operation
         progress_window.update_idletasks()
 
-        # Progress label
         progress_label = ttk.Label(progress_window, text="Downloading FFmpeg...", font=("Helvetica", 12))
         progress_label.pack(pady=10)
 
-        # Progress bar
         progress_bar = ttk.Progressbar(progress_window, orient="horizontal", length=250, mode="indeterminate")
         progress_bar.pack(pady=10)
 
-        # Ensure progress bar is visible
         progress_window.update()
         progress_bar.start()
 
         def install_ffmpeg():
             try:
-                # Create ffmpeg directory
                 os.makedirs(ffmpeg_path, exist_ok=True)
-
-                # Download FFmpeg
                 url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
                 response = requests.get(url, stream=True)
                 zip_path = os.path.join(ffmpeg_path, 'ffmpeg.zip')
 
-                # Save zip file
                 with open(zip_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
 
-                # Extract zip
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                    # Find the inner directory with actual binaries
                     for member in zip_ref.namelist():
                         if member.startswith('ffmpeg-master-latest-win64-gpl/bin/'):
                             zip_ref.extract(member, path=ffmpeg_path)
 
-                # Move binaries to main ffmpeg folder
                 inner_bin = os.path.join(ffmpeg_path, 'ffmpeg-master-latest-win64-gpl', 'bin')
                 for filename in os.listdir(inner_bin):
                     os.rename(
@@ -364,24 +375,17 @@ class YouTubeDownloader:
                         os.path.join(ffmpeg_path, filename)
                     )
 
-                # Clean up
                 os.remove(zip_path)
                 import shutil
                 shutil.rmtree(os.path.join(ffmpeg_path, 'ffmpeg-master-latest-win64-gpl'))
 
-                # Add to PATH
                 self.add_to_path(ffmpeg_path)
 
-                # Close progress window and show success message
-                progress_window.destroy()
-                messagebox.showinfo("FFmpeg", "FFmpeg has been successfully installed.")
+                self.master.after(0, lambda: [progress_window.destroy(), messagebox.showinfo("FFmpeg", "FFmpeg has been successfully installed.")])
 
             except Exception as e:
-                # Close progress window
-                progress_window.destroy()
-                messagebox.showerror("FFmpeg Installation Error", str(e))
+                self.master.after(0, lambda: [progress_window.destroy(), messagebox.showerror("FFmpeg Installation Error", str(e))])
 
-        # Run installation in a separate thread to keep UI responsive
         threading.Thread(target=install_ffmpeg, daemon=True).start()
 
     def add_to_path(self, new_path):
@@ -834,10 +838,6 @@ class YouTubeDownloader:
         threading.Thread(target=download_worker, daemon=True).start()
 
 
-def check_and_install_ffmpeg():
-    pass
-
-
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
     if hasattr(sys, '_MEIPASS'):
@@ -845,18 +845,21 @@ def resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 def main():
-    # Check and install FFmpeg before starting the app
-    check_and_install_ffmpeg()
-
     root = tk.Tk()
 
-    sv_ttk.THEME_PATH = resource_path("sv_ttk")
-    # Apply Sun Valley theme
-    sv_ttk.set_theme("dark")
-
-    # Apply dark title bar
-    # pywinstyles.apply_style(root, "dark")
-
+    # Apply Sun Valley theme once at the beginning
+    try:
+        sv_ttk.THEME_PATH = resource_path("sv_ttk")
+        sv_ttk.set_theme("dark")
+        
+        # Apply dark title bar for Windows
+        try:
+            import pywinstyles
+            pywinstyles.apply_style(root, "dark")
+        except ImportError:
+            pass
+    except Exception as e:
+        print(f"Error applying theme: {e}")
 
     app = YouTubeDownloader(root)
     root.mainloop()
