@@ -555,7 +555,7 @@ class YouTubeDownloader:
         video_quality = self.var_video_quality.get()
 
         # Base command
-        comando = ["yt-dlp"]
+        comando = ["yt-dlp", "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"]
 
         if video_format == 0:  # Audio Only
             comando.extend([
@@ -638,6 +638,8 @@ class YouTubeDownloader:
             if video_format == 0 and keep_video:
                 video_comando = [
                     "yt-dlp",
+                    "--js-runtimes", "node",
+                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
                     "-f",
                     f"bestvideo[height<={video_quality}]+bestaudio/best[height<={video_quality}]" if video_quality != "max" else "bestvideo+bestaudio/best",
                     "-o", f"{carpeta}/{sanitized_title} - {sanitized_artist}_original.%(ext)s",
@@ -680,7 +682,12 @@ class YouTubeDownloader:
         validated_links = []
 
         for link in links:
-            link = link.strip()
+            # More aggressive cleaning using regex to find the actual URL
+            url_match = re.search(r'(https?://[^\s`\'"]+)', link)
+            if not url_match:
+                continue
+            
+            link = url_match.group(1).strip()
             if not link:
                 continue
 
@@ -694,7 +701,7 @@ class YouTubeDownloader:
 
                 # Flat playlist extraction
                 result = subprocess.run(
-                    ["yt-dlp", "--flat-playlist", "-J", link],
+                    ["yt-dlp", "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "--flat-playlist", "-J", link],
                     capture_output=True,
                     text=True,
                     check=True
@@ -721,7 +728,7 @@ class YouTubeDownloader:
 
                     # Detailed video metadata
                     video_result = subprocess.run(
-                        ["yt-dlp", "-J", video_url],
+                        ["yt-dlp", "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "-J", video_url],
                         capture_output=True,
                         text=True,
                         check=True
@@ -772,7 +779,8 @@ class YouTubeDownloader:
             self.songs_tree.delete(item)
 
         # Get inputs
-        enlaces = self.entrada_enlaces.get("1.0", tk.END).strip().split('\n')
+        enlaces_raw = self.entrada_enlaces.get("1.0", tk.END).strip().split('\n')
+        enlaces = [link.strip() for link in enlaces_raw if link.strip()]
         carpeta = self.entrada_carpeta.get().strip()
 
         # Validate links and get metadata
