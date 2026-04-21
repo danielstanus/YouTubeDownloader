@@ -24,6 +24,14 @@ class YouTubeDownloader:
         master.title(f"YouTube Downloader by Daniel Calin Stanus - {self.VERSION}")
         master.geometry("1200x720")
 
+        # Set window icon
+        try:
+            icon_path = resource_path("logo.ico")
+            if os.path.exists(icon_path):
+                master.iconbitmap(icon_path)
+        except Exception as e:
+            print(f"Error loading icon: {e}")
+
         self.center_window()
 
         # Force Dark Mode Theme

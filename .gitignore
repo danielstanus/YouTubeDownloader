@@ -98,3 +98,8 @@ ENV/
 
 # Project specific logs
 *.log
+
+# Large Binaries
+*.zip
+installer_output/
+*.exe
