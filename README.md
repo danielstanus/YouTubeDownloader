@@ -3,14 +3,13 @@
 Una herramienta sencilla y potente para descargar videos de YouTube en formato audio (MP3 o calidad original) con una interfaz gráfica moderna.
 
 ## 📦 Descarga de la Versión v1.0.0
-Debido a los límites de tamaño de GitHub, el paquete se ha dividido en dos archivos. Para una instalación completa:
+Ya puedes descargar la versión definitiva en un solo archivo:
 
-1. **Aplicación**: Descarga `YouTube_Downloader_v1.0.0_NoFFmpeg.zip`. Incluye el ejecutable y el motor de descarga `yt-dlp`.
-2. **Dependencias (Opcional)**: Descarga `FFmpeg_Binaries_Windows.zip` si quieres tener FFmpeg incluido manualmente (necesario para conversiones de audio de alta calidad).
-   - Extrae ambos ZIPs en la misma carpeta.
+1. **Aplicación Completa**: Descarga [YouTube Downloader by DS.zip](https://github.com/danielstanus/YouTubeDownloader/blob/main/YouTube%20Downloader%20by%20DS.zip).
+   - Extrae el contenido en una carpeta.
    - Ejecuta `YouTube Downloader by DS.exe`.
 
-*Nota: La aplicación intentará descargar e instalar FFmpeg automáticamente si no lo encuentra.*
+*Nota: La aplicación incluye el motor de descarga y puede gestionar FFmpeg automáticamente.*
 
 ---
 
