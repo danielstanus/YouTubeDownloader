@@ -14,6 +14,7 @@ import pywinstyles
 import winreg
 import zipfile
 import requests
+from collections import deque
 
 
 class YouTubeDownloader:
@@ -50,6 +51,8 @@ class YouTubeDownloader:
 
         # Create UI
         self.create_widgets()
+        self._console_buffer = deque(maxlen=800)
+        self._console_log_path = os.path.join(os.path.abspath("."), "console_output.log")
 
     def create_widgets(self):
         # Main frame
@@ -306,13 +309,22 @@ class YouTubeDownloader:
         self.error_label.pack(fill="x", pady=5)
 
         # Integrated Console Frame
-        console_frame = ttk.Frame(main_frame)
-        console_frame.pack(fill="both", expand=True, pady=(10, 0))
+        self.show_console_var = tk.IntVar(value=0)
+        ttk.Checkbutton(
+            buttons_frame,
+            text="Show Console",
+            variable=self.show_console_var,
+            command=self.toggle_console
+        ).pack(side="right")
 
-        ttk.Label(console_frame, text="💻 Console Output:", font=("Helvetica", 14)).pack(anchor="w")
+        self.console_frame = ttk.Frame(main_frame)
+        # start hidden; user can enable it
+        # self.console_frame.pack(fill="both", expand=True, pady=(10, 0))
+
+        ttk.Label(self.console_frame, text="💻 Console Output:", font=("Helvetica", 14)).pack(anchor="w")
 
         # Container for Console to simulate borders
-        console_container = tk.Frame(console_frame, bg="#333333", padx=1, pady=1)
+        console_container = tk.Frame(self.console_frame, bg="#333333", padx=1, pady=1)
         console_container.pack(fill="both", expand=True)
 
         self.console_output = tk.Text(
@@ -320,7 +332,7 @@ class YouTubeDownloader:
             height=8,
             font=("Consolas", 10),
             bg="#000000",
-            fg="#00ff00",  # Classic terminal green
+            fg="#ffffff",
             insertbackground="white",
             padx=10,
             pady=10,
@@ -338,16 +350,51 @@ class YouTubeDownloader:
         self.console_output.pack(side="left", fill="both", expand=True)
         console_scrollbar.pack(side="right", fill="y")
 
+    def toggle_console(self):
+        show = self.show_console_var.get() == 1
+        if show:
+            self.console_frame.pack(fill="both", expand=True, pady=(10, 0))
+            # dump buffered lines
+            try:
+                self.console_output.configure(state="normal")
+                self.console_output.delete("1.0", "end")
+                if self._console_buffer:
+                    self.console_output.insert("end", "\n".join(self._console_buffer) + "\n")
+                self.console_output.see("end")
+                self.console_output.configure(state="disabled")
+            except Exception:
+                pass
+        else:
+            try:
+                self.console_frame.pack_forget()
+            except Exception:
+                pass
+
     def log_to_console(self, message):
-        """Add message to the integrated console"""
-        if message:
-            def update():
+        """Store console output and optionally show it in the UI."""
+        if not message:
+            return
+
+        self._console_buffer.append(str(message))
+        try:
+            with open(self._console_log_path, "a", encoding="utf-8", errors="replace") as f:
+                f.write(f"{message}\n")
+        except Exception:
+            pass
+
+        if getattr(self, "show_console_var", None) is None or self.show_console_var.get() != 1:
+            return
+
+        def update():
+            try:
                 self.console_output.configure(state="normal")
                 self.console_output.insert("end", f"{message}\n")
                 self.console_output.see("end")
                 self.console_output.configure(state="disabled")
-            
-            self.master.after(0, update)
+            except Exception:
+                pass
+
+        self.master.after(0, update)
 
     def _set_controls_enabled(self, enabled: bool):
         state = "normal" if enabled else "disabled"
@@ -778,8 +825,8 @@ class YouTubeDownloader:
 
         comando.extend([
             "-o", output_template,
-            "--progress",
-            "-q"
+            "--newline",
+            "--progress"
         ])
 
         # Add metadata and thumbnail options for audio
@@ -891,6 +938,7 @@ class YouTubeDownloader:
                 continue
 
             try:
+                self.log_to_console(f"[INFO] Analizando: {link}")
                 # Print diagnostic information
                 print(f"Processing link: {link}")
 
@@ -919,9 +967,11 @@ class YouTubeDownloader:
                 if 'entries' in data:
                     entries = data['entries']
                     print(f"Playlist detected: {len(entries)} entries")
+                    self.log_to_console(f"[INFO] Playlist detectada: {len(entries)} elemento(s)")
                 else:
                     entries = [data]
                     print("Single video detected")
+                    self.log_to_console("[INFO] Vídeo único detectado")
 
                 for entry in entries:
                     video_url = entry.get('url', entry.get('id', ''))
@@ -950,6 +1000,7 @@ class YouTubeDownloader:
                     artist = metadata.get('uploader', 'Unknown Artist').strip()
 
                     print(f"Found video: {title} by {artist}")
+                    self.log_to_console(f"[INFO] Encontrado: {title} - {artist}")
 
                     validated_links.append({
                         'link': video_url,
@@ -961,14 +1012,18 @@ class YouTubeDownloader:
                 print(f"Subprocess error: {e}")
                 print(f"Stderr: {e.stderr}")
                 logging.error(f"Metadata extraction error for {link}: {e}")
+                if e.stderr:
+                    self.log_to_console(f"[ERROR] {e.stderr.strip()}")
                 self.show_error(f"Could not process link: {link}")
             except json.JSONDecodeError as e:
                 print(f"JSON decoding error: {e}")
                 logging.error(f"Invalid JSON response for {link}")
+                self.log_to_console("[ERROR] Respuesta JSON inválida al obtener metadatos")
                 self.show_error(f"Could not parse metadata for {link}")
             except Exception as e:
                 print(f"Unexpected error: {e}")
                 logging.error(f"Unexpected error processing {link}: {e}")
+                self.log_to_console(f"[ERROR] {str(e)}")
                 self.show_error(f"Unexpected error processing {link}")
 
         if not validated_links:
