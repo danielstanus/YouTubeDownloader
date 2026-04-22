@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import sv_ttk
@@ -22,7 +23,7 @@ class YouTubeDownloader:
 
         self.master = master
         master.title(f"YouTube Downloader by Daniel Calin Stanus - {self.VERSION}")
-        master.geometry("1200x720")
+        master.geometry("1200x900")
 
         # Set window icon
         try:
@@ -267,13 +268,15 @@ class YouTubeDownloader:
         # Downloaded Songs Treeview
         songs_frame = ttk.Frame(main_frame)
         songs_frame.pack(fill="both", expand=True, pady=(10, 0))
-
+        
         ttk.Label(songs_frame, text="📋 Downloaded Songs:", font=("Helvetica", 14)).pack(anchor="w")
 
+        # Limit height of songs treeview so console has space
         self.songs_tree = ttk.Treeview(
             songs_frame,
             columns=('Title', 'Status'),
-            show='headings'
+            show='headings',
+            height=6
         )
 
         # Define column headings
@@ -300,6 +303,63 @@ class YouTubeDownloader:
             foreground="red"
         )
         self.error_label.pack(fill="x", pady=5)
+
+        # Integrated Console Frame
+        console_frame = ttk.Frame(main_frame)
+        console_frame.pack(fill="both", expand=True, pady=(10, 0))
+
+        ttk.Label(console_frame, text="💻 Console Output:", font=("Helvetica", 14)).pack(anchor="w")
+
+        # Container for Console to simulate borders
+        console_container = tk.Frame(console_frame, bg="#333333", padx=1, pady=1)
+        console_container.pack(fill="both", expand=True)
+
+        self.console_output = tk.Text(
+            console_container,
+            height=8,
+            font=("Consolas", 10),
+            bg="#000000",
+            fg="#00ff00",  # Classic terminal green
+            insertbackground="white",
+            padx=10,
+            pady=10,
+            borderwidth=0,
+            state="disabled"
+        )
+        
+        console_scrollbar = ttk.Scrollbar(
+            console_container,
+            orient="vertical",
+            command=self.console_output.yview
+        )
+        self.console_output.configure(yscroll=console_scrollbar.set)
+        
+        self.console_output.pack(side="left", fill="both", expand=True)
+        console_scrollbar.pack(side="right", fill="y")
+
+    def log_to_console(self, message):
+        """Add message to the integrated console"""
+        if message:
+            def update():
+                self.console_output.configure(state="normal")
+                self.console_output.insert("end", f"{message}\n")
+                self.console_output.see("end")
+                self.console_output.configure(state="disabled")
+            
+            self.master.after(0, update)
+
+    def _popen_kwargs_hidden(self):
+        """
+        Ensure subprocesses don't spawn a separate console window on Windows.
+        """
+        kwargs = {}
+        if os.name == 'nt':
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = subprocess.SW_HIDE
+            kwargs["startupinfo"] = startupinfo
+            kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+        return kwargs
 
 
 
@@ -472,22 +532,33 @@ class YouTubeDownloader:
 
 
     def update_ytdlp(self):
-        """Update YT-DLP to nightly version"""
-        try:
-            # Run update command
-            result = subprocess.run(
-                ["yt-dlp", "--update-to", "nightly"],
-                capture_output=True,
-                text=True
-            )
+        def update_thread():
+            try:
+                self.log_to_console("--- Updating YT-DLP engine ---")
 
-            # Show update result
-            if result.returncode == 0:
-                messagebox.showinfo("Update", "YT-DLP updated successfully!")
-            else:
-                messagebox.showerror("Update Error", result.stderr)
-        except Exception as e:
-            messagebox.showerror("Update Error", str(e))
+                process = subprocess.Popen(
+                    ["pip", "install", "-U", "yt-dlp"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    **self._popen_kwargs_hidden()
+                )
+                
+                for line in process.stdout or []:
+                    clean_line = line.strip()
+                    self.log_to_console(clean_line)
+                
+                process.wait()
+                
+                if process.returncode == 0:
+                    self.master.after(0, lambda: messagebox.showinfo("Update", "YT-DLP has been updated successfully."))
+                else:
+                    self.master.after(0, lambda: messagebox.showerror("Update Error", "Failed to update YT-DLP."))
+            except Exception as e:
+                self.master.after(0, lambda: messagebox.showerror("Update Error", str(e)))
+
+        threading.Thread(target=update_thread, daemon=True).start()
 
     def open_download_folder(self):
         """Open the download folder"""
@@ -629,15 +700,19 @@ class YouTubeDownloader:
             process = subprocess.Popen(
                 comando,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+                **self._popen_kwargs_hidden()
             )
 
             current_filepath = None
 
             # Read output in real-time
-            for line in process.stdout:
-                logging.info(line.strip())
+            for line in process.stdout or []:
+                clean_line = line.strip()
+                logging.info(clean_line)
+                self.log_to_console(clean_line)
                 progress_info = self.parse_progress(line)
 
                 if '[ExtractAudio]' in line:
@@ -660,12 +735,17 @@ class YouTubeDownloader:
                     "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
                     "-f",
                     f"bestvideo[height<={video_quality}]+bestaudio/best[height<={video_quality}]" if video_quality != "max" else "bestvideo+bestaudio/best",
-                    "-o", f"{carpeta}/{sanitized_title} - {sanitized_artist}_original.%(ext)s",
-                    "--progress",
-                    "-q",
+                    "-o", output_template.replace(".%(ext)s", "_video.%(ext)s"),
                     enlace
                 ]
-                subprocess.run(video_comando)
+                
+                subprocess.Popen(
+                    video_comando,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    **self._popen_kwargs_hidden()
+                )
 
             if process.returncode == 0:
                 self.master.after(0, lambda:
@@ -718,11 +798,19 @@ class YouTubeDownloader:
                 print(f"Processing link: {link}")
 
                 # Flat playlist extraction
+                startupinfo = None
+                if os.name == 'nt':
+                    startupinfo = subprocess.STARTUPINFO()
+                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                    startupinfo.wShowWindow = subprocess.SW_HIDE
+
                 result = subprocess.run(
                     ["yt-dlp", "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "--flat-playlist", "-J", link],
                     capture_output=True,
                     text=True,
-                    check=True
+                    check=True,
+                    startupinfo=startupinfo,
+                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                 )
 
                 # Print raw JSON for debugging
@@ -745,11 +833,19 @@ class YouTubeDownloader:
                         continue
 
                     # Detailed video metadata
+                    startupinfo_metadata = None
+                    if os.name == 'nt':
+                        startupinfo_metadata = subprocess.STARTUPINFO()
+                        startupinfo_metadata.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        startupinfo_metadata.wShowWindow = subprocess.SW_HIDE
+
                     video_result = subprocess.run(
                         ["yt-dlp", "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "-J", video_url],
                         capture_output=True,
                         text=True,
-                        check=True
+                        check=True,
+                        startupinfo=startupinfo_metadata,
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
                     )
                     metadata = json.loads(video_result.stdout)
 
@@ -859,6 +955,7 @@ def resource_path(relative_path):
     return os.path.join(os.path.abspath("."), relative_path)
 
 def main():
+    start_time = time.time()
     root = tk.Tk()
 
     # Apply Sun Valley theme once at the beginning
@@ -876,6 +973,10 @@ def main():
         print(f"Error applying theme: {e}")
 
     app = YouTubeDownloader(root)
+    
+    end_time = time.time()
+    print(f"--- [INFO] Startup time: {end_time - start_time:.4f} seconds ---")
+    
     root.mainloop()
 
 
