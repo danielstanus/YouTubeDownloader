@@ -42,9 +42,28 @@ class YouTubeDownloader:
         except Exception as e:
             print(f"Error applying theme in init: {e}")
 
+        # App writable paths (avoid Program Files permissions)
+        self._app_data_dir = self._get_app_data_dir()
+        self._log_dir = os.path.join(self._app_data_dir, "logs")
+        os.makedirs(self._log_dir, exist_ok=True)
+
         # Logging setup
-        logging.basicConfig(filename='YouTube_Downloader_by_DS.log', level=logging.INFO,
-                            format='%(asctime)s - %(levelname)s - %(message)s')
+        self._main_log_path = os.path.join(self._log_dir, "YouTube_Downloader_by_DS.log")
+        try:
+            logging.basicConfig(
+                filename=self._main_log_path,
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s'
+            )
+        except Exception:
+            # Fallback to temp if something is still wrong
+            import tempfile
+            self._main_log_path = os.path.join(tempfile.gettempdir(), "YouTube_Downloader_by_DS.log")
+            logging.basicConfig(
+                filename=self._main_log_path,
+                level=logging.INFO,
+                format='%(asctime)s - %(levelname)s - %(message)s'
+            )
 
         # Check and install FFmpeg in a background thread to not block UI
         threading.Thread(target=self.check_and_install_ffmpeg, daemon=True).start()
@@ -52,7 +71,17 @@ class YouTubeDownloader:
         # Create UI
         self.create_widgets()
         self._console_buffer = deque(maxlen=800)
-        self._console_log_path = os.path.join(os.path.abspath("."), "console_output.log")
+        self._console_log_path = os.path.join(self._log_dir, "console_output.log")
+
+    def _get_app_data_dir(self):
+        """
+        Return a per-user writable directory for app data/logs.
+        """
+        if os.name == "nt":
+            base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+            if base:
+                return os.path.join(base, "YouTubeDownloaderDS")
+        return os.path.join(os.path.expanduser("~"), ".YouTubeDownloaderDS")
 
     def create_widgets(self):
         # Main frame
@@ -762,13 +791,7 @@ class YouTubeDownloader:
         title = link_info['title']
         artist = link_info['artist']
         display_name = f"{title} - {artist}".strip()
-
-        # Al inicio del método, configura logging
-        logging.basicConfig(
-            filename='download_log.txt',
-            level=logging.INFO,
-            format='%(asctime)s - %(message)s'
-        )
+        logging.info(f"Starting download: {display_name}")
 
         # Add to treeview initially as Downloading
         item_id = self.master.after(0, lambda:
