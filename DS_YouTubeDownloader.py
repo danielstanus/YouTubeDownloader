@@ -243,11 +243,12 @@ class YouTubeDownloader:
         buttons_frame.pack(fill="x", pady=(10, 10))
 
         # Update YT-DLP Button
-        ttk.Button(
+        self.update_button = ttk.Button(
             buttons_frame,
             text="Update Source",
             command=self.update_ytdlp
-        ).pack(side="left", padx=(0, 10))
+        )
+        self.update_button.pack(side="left", padx=(0, 10))
 
         # Open Folder Button
         ttk.Button(
@@ -257,13 +258,13 @@ class YouTubeDownloader:
         ).pack(side="left", padx=(0, 10))
 
         # Download Button
-        download_button = ttk.Button(
+        self.download_button = ttk.Button(
             buttons_frame,
             text="📥 Start Download",
             command=self.iniciar_descarga,
             style='Accent.TButton'
         )
-        download_button.pack(side="left", expand=True)
+        self.download_button.pack(side="left", expand=True)
 
         # Downloaded Songs Treeview
         songs_frame = ttk.Frame(main_frame)
@@ -347,6 +348,105 @@ class YouTubeDownloader:
                 self.console_output.configure(state="disabled")
             
             self.master.after(0, update)
+
+    def _set_controls_enabled(self, enabled: bool):
+        state = "normal" if enabled else "disabled"
+        try:
+            self.update_button.configure(state=state)
+        except Exception:
+            pass
+        try:
+            self.download_button.configure(state=state)
+        except Exception:
+            pass
+
+    def _show_busy(self, title: str, message: str):
+        """
+        Simple modal-like progress popup to indicate background work.
+        """
+        def _create():
+            if getattr(self, "_busy_window", None) and self._busy_window.winfo_exists():
+                try:
+                    self._busy_message_var.set(message)
+                    return
+                except Exception:
+                    pass
+
+            self._busy_window = tk.Toplevel(self.master)
+            self._busy_window.title(title)
+            self._busy_window.geometry("420x140")
+            self._busy_window.transient(self.master)
+            self._busy_window.resizable(False, False)
+            self._busy_window.protocol("WM_DELETE_WINDOW", lambda: None)
+
+            self._busy_message_var = tk.StringVar(value=message)
+            ttk.Label(self._busy_window, textvariable=self._busy_message_var, font=("Helvetica", 11)).pack(
+                padx=16, pady=(16, 10), anchor="w"
+            )
+
+            self._busy_bar = ttk.Progressbar(self._busy_window, orient="horizontal", mode="indeterminate", length=380)
+            self._busy_bar.pack(padx=16, pady=(0, 10), fill="x")
+            self._busy_bar.start(12)
+
+            ttk.Label(self._busy_window, text="(No cierres la app)", foreground="#888888").pack(
+                padx=16, pady=(0, 12), anchor="w"
+            )
+
+            try:
+                self._busy_window.grab_set()
+            except Exception:
+                pass
+
+            self._busy_window.update_idletasks()
+            try:
+                x = self.master.winfo_x() + (self.master.winfo_width() // 2) - 210
+                y = self.master.winfo_y() + (self.master.winfo_height() // 2) - 70
+                self._busy_window.geometry(f"+{x}+{y}")
+            except Exception:
+                pass
+
+        self.master.after(0, _create)
+
+    def _update_busy(self, message: str):
+        def _u():
+            if getattr(self, "_busy_window", None) and self._busy_window.winfo_exists():
+                try:
+                    self._busy_message_var.set(message)
+                except Exception:
+                    pass
+        self.master.after(0, _u)
+
+    def _hide_busy(self):
+        def _destroy():
+            if getattr(self, "_busy_window", None) and self._busy_window.winfo_exists():
+                try:
+                    self._busy_bar.stop()
+                except Exception:
+                    pass
+                try:
+                    self._busy_window.grab_release()
+                except Exception:
+                    pass
+                try:
+                    self._busy_window.destroy()
+                except Exception:
+                    pass
+        self.master.after(0, _destroy)
+
+    def _ui_set_progress(self, value: float | int | None = None, text: str | None = None):
+        def _u():
+            if value is not None:
+                try:
+                    self.progress_bar.configure(mode="determinate", maximum=100)
+                    self.progress_bar["value"] = float(value)
+                except Exception:
+                    pass
+            if text is not None:
+                try:
+                    self.progress_label.configure(text=text)
+                except Exception:
+                    pass
+        self.master.after(0, _u)
 
     def _popen_kwargs_hidden(self):
         """
@@ -586,8 +686,7 @@ class YouTubeDownloader:
         if match:
             try:
                 progress = float(match.group(1))
-                self.progress_bar['value'] = (progress / 100)
-                self.master.update_idletasks()
+                self._ui_set_progress(value=progress)
             except ValueError:
                 pass
 
@@ -600,14 +699,14 @@ class YouTubeDownloader:
         if filename_match:
             current_filename = os.path.basename(filename_match.group(1))
             result['filename'] = current_filename
-            self.progress_label.configure(text=f"Downloading: {current_filename}")
+            self._ui_set_progress(text=f"Downloading: {current_filename}")
 
         if title_match:
             result['title'] = title_match.group(1).strip('"')
-            self.progress_label.configure(text=f"Downloading: {result['title']}")
+            self._ui_set_progress(text=f"Downloading: {result['title']}")
 
         if extract_match and current_filename:
-            self.progress_label.configure(text=f"Extracting Audio: {current_filename}")
+            self._ui_set_progress(text=f"Extracting Audio: {current_filename}")
 
         return result
 
@@ -693,8 +792,7 @@ class YouTubeDownloader:
         comando.append(enlace)
 
         try:
-            self.progress_bar['value'] = (0)
-            self.progress_label.configure(text=f"Downloading: {display_name}")
+            self._ui_set_progress(value=0, text=f"Downloading: {display_name}")
 
             # First download with video if needed
             process = subprocess.Popen(
@@ -719,7 +817,7 @@ class YouTubeDownloader:
                     self.master.after(0, lambda:
                     self.update_download_status(display_name, '⏳ Extracting Audio', '')
                                       )
-                    self.progress_label.configure(text=f"Extracting Audio: {display_name}")
+                    self._ui_set_progress(text=f"Extracting Audio: {display_name}")
 
                 dest_match = re.search(r'Destination:\s+(.+)', line)
                 if dest_match:
@@ -751,19 +849,18 @@ class YouTubeDownloader:
                 self.master.after(0, lambda:
                 self.update_download_status(display_name, '✅ Complete', current_filepath or '')
                                   )
-                self.progress_label.configure(text=f"Download complete: {display_name}")
-                self.progress_bar['value'] = (100)
+                self._ui_set_progress(value=100, text=f"Download complete: {display_name}")
             else:
                 self.master.after(0, lambda:
                 self.update_download_status(display_name, '❌ Error', '')
                                   )
-                self.progress_label.configure(text=f"Error downloading: {display_name}")
+                self._ui_set_progress(text=f"Error downloading: {display_name}")
 
         except Exception as e:
             self.master.after(0, lambda:
             self.update_download_status(display_name, '❌ Error', '')
                               )
-            self.progress_label.configure(text=f"Error: {str(e)}")
+            self._ui_set_progress(text=f"Error: {str(e)}")
 
     def update_download_status(self, link, status, filepath):
         """
@@ -887,65 +984,82 @@ class YouTubeDownloader:
         logging.error(message)
 
     def iniciar_descarga(self):
-        # Reset UI elements
+        # Reset UI elements (main thread)
         self.error_label.configure(text="")
         for item in self.songs_tree.get_children():
             self.songs_tree.delete(item)
 
         # Get inputs
         enlaces_raw = self.entrada_enlaces.get("1.0", tk.END).strip().split('\n')
-        enlaces = [link.strip() for link in enlaces_raw if link.strip()]
-        carpeta = self.entrada_carpeta.get().strip()
+        raw_links = [link.strip() for link in enlaces_raw if link.strip()]
+        carpeta = self.entrada_carpeta.get().strip() or r"C:\DS_YouTubeDownloader"
 
-        # Validate links and get metadata
-        enlaces = self.validate_youtube_links(enlaces)
-        if not enlaces:
+        if not raw_links:
+            self.show_error("Please paste at least one YouTube link.")
             return
 
-        # Validate and create download folder
-        if not carpeta:
-            carpeta = r"C:\DS_YouTubeDownloader"
+        self._set_controls_enabled(False)
+        self._ui_set_progress(value=0, text="Preparing downloads...")
+        self._show_busy("Procesando", "Analizando enlaces y obteniendo metadatos...")
 
-        try:
-            os.makedirs(carpeta, exist_ok=True)
-        except Exception as e:
-            self.show_error(f"Could not create download folder: {e}")
-            return
+        def _prepare_and_start():
+            try:
+                # Validate links and get metadata (background thread)
+                enlaces = self.validate_youtube_links(raw_links)
+                if not enlaces:
+                    self.master.after(0, lambda: self._ui_set_progress(text="No valid links found."))
+                    return
 
-        # Determine format and quality
-        formato = "mp3" if self.var_formato.get() == 1 else "best"
-        calidad = "0" if self.var_calidad.get() == 1 else ("128K" if self.var_calidad.get() == 2 else "192K")
-        metadatos = self.var_metadatos.get() == 1
-        miniatura = self.var_miniatura.get() == 1
+                # Create download folder
+                try:
+                    os.makedirs(carpeta, exist_ok=True)
+                except Exception as e:
+                    self.master.after(0, lambda: self.show_error(f"Could not create download folder: {e}"))
+                    return
 
-        # Semaphore to limit concurrent downloads
-        download_semaphore = threading.Semaphore(3)  # Limit to 3 concurrent downloads
+                # Determine format and quality
+                formato = "mp3" if self.var_formato.get() == 1 else "best"
+                calidad = "0" if self.var_calidad.get() == 1 else ("128K" if self.var_calidad.get() == 2 else "192K")
+                metadatos = self.var_metadatos.get() == 1
+                miniatura = self.var_miniatura.get() == 1
 
-        def download_wrapper(link_info):
-            with download_semaphore:
-                self.download_thread(link_info, carpeta, formato, calidad, metadatos, miniatura)
+                self._update_busy(f"Iniciando descargas ({len(enlaces)} elemento(s))...")
 
-        # Start downloads in separate threads
-        def download_worker():
-            threads = []
-            for link_info in enlaces:
-                thread = threading.Thread(
-                    target=download_wrapper,
-                    args=(link_info,),
-                    daemon=True
-                )
-                thread.start()
-                threads.append(thread)
+                # Semaphore to limit concurrent downloads
+                download_semaphore = threading.Semaphore(3)
 
-            # Wait for all downloads to complete
-            for thread in threads:
-                thread.join()
+                def download_wrapper(link_info):
+                    with download_semaphore:
+                        self.download_thread(link_info, carpeta, formato, calidad, metadatos, miniatura)
 
-            # Show completion message in main thread
-            self.master.after(0, lambda: messagebox.showinfo("Download", "All downloads completed"))
+                def download_worker():
+                    threads = []
+                    for link_info in enlaces:
+                        thread = threading.Thread(target=download_wrapper, args=(link_info,), daemon=True)
+                        thread.start()
+                        threads.append(thread)
 
-        # Ensure download worker runs in a separate thread
-        threading.Thread(target=download_worker, daemon=True).start()
+                    for thread in threads:
+                        thread.join()
+
+                    self.master.after(0, lambda: messagebox.showinfo("Download", "All downloads completed"))
+                    self.master.after(0, lambda: self._ui_set_progress(text="All downloads completed."))
+                    self.master.after(0, self._hide_busy)
+                    self.master.after(0, lambda: self._set_controls_enabled(True))
+
+                # Hide busy popup once downloads are running (UI stays responsive and tree/console update)
+                self.master.after(0, self._hide_busy)
+                threading.Thread(target=download_worker, daemon=True).start()
+
+            finally:
+                # If we exited early due to errors, ensure we re-enable UI and close busy window.
+                def _cleanup_if_still_busy():
+                    if getattr(self, "_busy_window", None) and self._busy_window.winfo_exists():
+                        self._hide_busy()
+                        self._set_controls_enabled(True)
+                self.master.after(0, _cleanup_if_still_busy)
+
+        threading.Thread(target=_prepare_and_start, daemon=True).start()
 
 
 def resource_path(relative_path):
