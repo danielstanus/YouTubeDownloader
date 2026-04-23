@@ -68,6 +68,9 @@ class YouTubeDownloader:
         # Check and install FFmpeg in a background thread to not block UI
         threading.Thread(target=self.check_and_install_ffmpeg, daemon=True).start()
 
+        # Check and update yt-dlp automatically on startup (background thread)
+        self.check_and_update_ytdlp_standalone()
+
         # Create UI
         self.create_widgets()
         self._console_buffer = deque(maxlen=800)
@@ -735,6 +738,108 @@ class YouTubeDownloader:
                 self.master.after(0, lambda: messagebox.showerror("Update Error", str(e)))
 
         threading.Thread(target=update_thread, daemon=True).start()
+
+    def check_and_update_ytdlp_standalone(self):
+        """
+        Check and update yt-dlp.exe standalone version automatically on startup.
+        Runs in background thread to not block UI.
+        """
+        def _update_check():
+            try:
+                ytdlp_path = resource_path("yt-dlp.exe")
+                
+                # Get current version
+                current_version = None
+                if os.path.exists(ytdlp_path):
+                    try:
+                        result = subprocess.run(
+                            [ytdlp_path, "--version"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        if result.returncode == 0:
+                            current_version = result.stdout.strip()
+                            logging.info(f"Current yt-dlp version: {current_version}")
+                    except Exception as e:
+                        logging.warning(f"Could not get current yt-dlp version: {e}")
+                
+                # Get latest version from GitHub API
+                try:
+                    api_url = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
+                    response = requests.get(api_url, timeout=10)
+                    response.raise_for_status()
+                    release_data = response.json()
+                    latest_version = release_data.get("tag_name", "").lstrip("v")
+                    
+                    if not latest_version:
+                        logging.warning("Could not determine latest yt-dlp version")
+                        return
+                    
+                    logging.info(f"Latest yt-dlp version: {latest_version}")
+                    
+                    # Compare versions (simple string comparison)
+                    if current_version and current_version == latest_version:
+                        logging.info("yt-dlp is up to date")
+                        return
+                    
+                    # Need to update - find download URL for Windows exe
+                    download_url = None
+                    for asset in release_data.get("assets", []):
+                        name = asset.get("name", "")
+                        if name.endswith(".exe") and "windows" in name.lower():
+                            download_url = asset.get("browser_download_url")
+                            break
+                    
+                    if not download_url:
+                        # Fallback to standard naming
+                        download_url = f"https://github.com/yt-dlp/yt-dlp/releases/download/{release_data.get('tag_name')}/yt-dlp.exe"
+                    
+                    logging.info(f"Updating yt-dlp to version {latest_version}...")
+                    
+                    # Download new version to temp file
+                    temp_path = ytdlp_path + ".tmp"
+                    download_response = requests.get(download_url, stream=True, timeout=60)
+                    download_response.raise_for_status()
+                    
+                    with open(temp_path, "wb") as f:
+                        for chunk in download_response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                    
+                    # Replace old version with new one
+                    if os.path.exists(ytdlp_path):
+                        try:
+                            os.remove(ytdlp_path + ".old")
+                        except:
+                            pass
+                        os.rename(ytdlp_path, ytdlp_path + ".old")
+                    
+                    os.rename(temp_path, ytdlp_path)
+                    
+                    # Clean up
+                    try:
+                        os.remove(ytdlp_path + ".old")
+                    except:
+                        pass
+                    
+                    logging.info(f"yt-dlp updated successfully to {latest_version}")
+                    
+                except requests.exceptions.RequestException as e:
+                    logging.warning(f"Could not check for yt-dlp updates (network error): {e}")
+                except Exception as e:
+                    logging.error(f"Error updating yt-dlp: {e}")
+                    # Clean up temp file if exists
+                    try:
+                        if os.path.exists(temp_path):
+                            os.remove(temp_path)
+                    except:
+                        pass
+                    
+            except Exception as e:
+                logging.error(f"Unexpected error in yt-dlp update check: {e}")
+        
+        threading.Thread(target=_update_check, daemon=True).start()
 
     def open_download_folder(self):
         """Open the download folder"""
