@@ -31,7 +31,7 @@ Source: "C:\YTDS\DS_YouTubeDownloader_Simple\dist\YouTube Downloader by DS.exe";
 ; Dependencias incluidas en el ZIP definitivo
 Source: "C:\ffmpeg\ffmpeg.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "C:\ffmpeg\ffprobe.exe"; DestDir: "{app}"; Flags: ignoreversion
-Source: "C:\ffmpeg\yt-dlp.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "C:\YTDS\DS_YouTubeDownloader_Simple\yt-dlp.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "C:\YTDS\DS_YouTubeDownloader_Simple\logo.ico"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
