@@ -4,7 +4,10 @@
 [Setup]
 AppId={{C7A4E3B1-D2B9-487D-9A6A-13A6A4DA43F8}
 AppName=YouTube Downloader by DS
-AppVersion=1.0.1
+#ifndef MyAppVersion
+  #error Pass the version with /DMyAppVersion=x.y.z (see version.py)
+#endif
+AppVersion={#MyAppVersion}
 AppPublisher=Daniel Calin Stanus
 AppPublisherURL=https://github.com/danielstanus/YouTubeDownloader
 AppSupportURL=https://github.com/danielstanus/YouTubeDownloader
@@ -13,14 +16,14 @@ DefaultDirName={autopf}\YouTubeDownloaderDS
 DisableProgramGroupPage=yes
 ; El instalador final se guardará en la carpeta Output del proyecto
 OutputDir=C:\YTDS\DS_YouTubeDownloader_Simple\installer_output
-OutputBaseFilename=YouTube_Downloader_DS_v1.0.1_Setup
+OutputBaseFilename=YouTube_Downloader_DS_v{#MyAppVersion}_Setup
 SetupIconFile=C:\YTDS\DS_YouTubeDownloader_Simple\logo.ico
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern
 
 [Languages]
-Name: "spanish"; MessagesFile: "compiler:Languages\Spanish.isl"
+Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
