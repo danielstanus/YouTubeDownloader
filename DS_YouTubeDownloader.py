@@ -20,6 +20,7 @@ from collections import deque
 
 class YouTubeDownloader:
     VERSION = "v1.0.1"
+    YTDLP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
 
     def __init__(self, master):
 
@@ -76,6 +77,22 @@ class YouTubeDownloader:
         self.create_widgets()
         self._console_buffer = deque(maxlen=800)
         self._console_log_path = os.path.join(self._log_dir, "console_output.log")
+
+        self._check_node_runtime()
+
+    def _check_node_runtime(self):
+        """
+        yt-dlp uses Node.js to solve some YouTube challenges. Warn if it is missing.
+        """
+        if shutil.which("node"):
+            return
+        logging.warning("Node.js not found in PATH")
+        self.log_to_console("⚠ Node.js no encontrado: algunos vídeos pueden fallar.")
+        messagebox.showwarning(
+            "Node.js no encontrado",
+            "No se encontró Node.js en este equipo. Algunos vídeos de YouTube pueden fallar sin él.\n\n"
+            "Instálalo desde https://nodejs.org para evitar errores de descarga."
+        )
 
     def _get_app_data_dir(self):
         """
@@ -412,8 +429,8 @@ class YouTubeDownloader:
         try:
             with open(self._console_log_path, "a", encoding="utf-8", errors="replace") as f:
                 f.write(f"{message}\n")
-        except Exception:
-            pass
+        except Exception as e:
+            logging.warning(f"Could not write console log: {e}")
 
         if getattr(self, "show_console_var", None) is None or self.show_console_var.get() != 1:
             return
@@ -711,6 +728,12 @@ class YouTubeDownloader:
             self.entrada_carpeta.insert(0, selected_folder)
 
 
+    def _ytdlp_base_command(self):
+        """
+        Base yt-dlp command shared by downloads and metadata requests.
+        """
+        return [self.get_ytdlp_path(), "--js-runtimes", "node", "--user-agent", self.YTDLP_USER_AGENT]
+
     def get_ytdlp_path(self):
         """
         Return the yt-dlp.exe used by the app. It lives in the per-user data folder
@@ -816,8 +839,8 @@ class YouTubeDownloader:
                 if temp_path and os.path.exists(temp_path):
                     try:
                         os.remove(temp_path)
-                    except OSError:
-                        pass
+                    except OSError as e:
+                        logging.warning(f"Could not remove temporary yt-dlp file: {e}")
             if on_done:
                 self.master.after(0, lambda: on_done(ok, message))
 
@@ -900,7 +923,7 @@ class YouTubeDownloader:
         video_quality = self.var_video_quality.get()
 
         # Base command
-        comando = [self.get_ytdlp_path(), "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"]
+        comando = self._ytdlp_base_command()
 
         if video_format == 0:  # Audio Only
             comando.extend([
@@ -984,10 +1007,7 @@ class YouTubeDownloader:
 
             # If audio only is selected and keep_video is True, make a copy of the video
             if video_format == 0 and keep_video:
-                video_comando = [
-                    self.get_ytdlp_path(),
-                    "--js-runtimes", "node",
-                    "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+                video_comando = self._ytdlp_base_command() + [
                     "-f",
                     f"bestvideo[height<={video_quality}]+bestaudio/best[height<={video_quality}]" if video_quality != "max" else "bestvideo+bestaudio/best",
                     "-o", output_template.replace(".%(ext)s", "_video.%(ext)s"),
@@ -1060,7 +1080,7 @@ class YouTubeDownloader:
                     startupinfo.wShowWindow = subprocess.SW_HIDE
 
                 result = subprocess.run(
-                    [self.get_ytdlp_path(), "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "--flat-playlist", "-J", link],
+                    self._ytdlp_base_command() + ["--flat-playlist", "-J", link],
                     capture_output=True,
                     text=True,
                     check=True,
@@ -1097,7 +1117,7 @@ class YouTubeDownloader:
                         startupinfo_metadata.wShowWindow = subprocess.SW_HIDE
 
                     video_result = subprocess.run(
-                        [self.get_ytdlp_path(), "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "-J", video_url],
+                        self._ytdlp_base_command() + ["-J", video_url],
                         capture_output=True,
                         text=True,
                         check=True,
