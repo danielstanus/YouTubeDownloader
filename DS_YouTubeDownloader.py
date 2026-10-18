@@ -1,5 +1,6 @@
 import os
 import subprocess
+import shutil
 import sys
 import threading
 import time
@@ -18,7 +19,7 @@ from collections import deque
 
 
 class YouTubeDownloader:
-    VERSION = "v1.0.0"
+    VERSION = "v1.0.1"
 
     def __init__(self, master):
 
@@ -69,7 +70,7 @@ class YouTubeDownloader:
         threading.Thread(target=self.check_and_install_ffmpeg, daemon=True).start()
 
         # Check and update yt-dlp automatically on startup (background thread)
-        self.check_and_update_ytdlp_standalone()
+        self._update_ytdlp_exe()
 
         # Create UI
         self.create_widgets()
@@ -710,136 +711,117 @@ class YouTubeDownloader:
             self.entrada_carpeta.insert(0, selected_folder)
 
 
+    def get_ytdlp_path(self):
+        """
+        Return the yt-dlp.exe used by the app. It lives in the per-user data folder
+        so it can be updated without admin rights.
+        """
+        ytdlp_dir = os.path.join(self._get_app_data_dir(), "bin")
+        os.makedirs(ytdlp_dir, exist_ok=True)
+        ytdlp_path = os.path.join(ytdlp_dir, "yt-dlp.exe")
+        if not os.path.exists(ytdlp_path):
+            bundled_path = resource_path("yt-dlp.exe")
+            if os.path.exists(bundled_path):
+                shutil.copy2(bundled_path, ytdlp_path)
+        return ytdlp_path
+
     def update_ytdlp(self):
-        def update_thread():
-            try:
-                self.log_to_console("--- Updating YT-DLP engine ---")
+        self.update_button.configure(state="disabled")
+        self.log_to_console("--- Updating YT-DLP engine ---")
 
-                process = subprocess.Popen(
-                    ["pip", "install", "-U", "yt-dlp"],
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,
-                    **self._popen_kwargs_hidden()
-                )
-                
-                for line in process.stdout or []:
-                    clean_line = line.strip()
-                    self.log_to_console(clean_line)
-                
-                process.wait()
-                
-                if process.returncode == 0:
-                    self.master.after(0, lambda: messagebox.showinfo("Update", "YT-DLP has been updated successfully."))
-                else:
-                    self.master.after(0, lambda: messagebox.showerror("Update Error", "Failed to update YT-DLP."))
-            except Exception as e:
-                self.master.after(0, lambda: messagebox.showerror("Update Error", str(e)))
+        def _on_done(ok, message):
+            self.update_button.configure(state="normal")
+            self.log_to_console(message)
+            if ok:
+                messagebox.showinfo("Update", message)
+            else:
+                messagebox.showerror("Update Error", message)
 
-        threading.Thread(target=update_thread, daemon=True).start()
+        self._update_ytdlp_exe(on_done=_on_done)
 
-    def check_and_update_ytdlp_standalone(self):
+    def _update_ytdlp_exe(self, on_done=None):
         """
-        Check and update yt-dlp.exe standalone version automatically on startup.
-        Runs in background thread to not block UI.
+        Download the latest yt-dlp.exe from GitHub into the app data folder.
+        Runs in a background thread. on_done(ok, message) is called on the Tk thread.
         """
-        def _update_check():
+        def _worker():
+            ok = False
+            message = ""
+            temp_path = None
             try:
-                ytdlp_path = resource_path("yt-dlp.exe")
-                
-                # Get current version
+                ytdlp_path = self.get_ytdlp_path()
+                temp_path = os.path.join(os.path.dirname(ytdlp_path), "yt-dlp.new.exe")
+
                 current_version = None
-                if os.path.exists(ytdlp_path):
-                    try:
-                        result = subprocess.run(
-                            [ytdlp_path, "--version"],
-                            capture_output=True,
-                            text=True,
-                            timeout=10
-                        )
-                        if result.returncode == 0:
-                            current_version = result.stdout.strip()
-                            logging.info(f"Current yt-dlp version: {current_version}")
-                    except Exception as e:
-                        logging.warning(f"Could not get current yt-dlp version: {e}")
-                
-                # Get latest version from GitHub API
                 try:
-                    api_url = "https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest"
-                    response = requests.get(api_url, timeout=10)
-                    response.raise_for_status()
-                    release_data = response.json()
-                    latest_version = release_data.get("tag_name", "").lstrip("v")
-                    
-                    if not latest_version:
-                        logging.warning("Could not determine latest yt-dlp version")
-                        return
-                    
-                    logging.info(f"Latest yt-dlp version: {latest_version}")
-                    
-                    # Compare versions (simple string comparison)
-                    if current_version and current_version == latest_version:
-                        logging.info("yt-dlp is up to date")
-                        return
-                    
-                    # Need to update - find download URL for Windows exe
-                    download_url = None
-                    for asset in release_data.get("assets", []):
-                        name = asset.get("name", "")
-                        if name.endswith(".exe") and "windows" in name.lower():
-                            download_url = asset.get("browser_download_url")
-                            break
-                    
-                    if not download_url:
-                        # Fallback to standard naming
-                        download_url = f"https://github.com/yt-dlp/yt-dlp/releases/download/{release_data.get('tag_name')}/yt-dlp.exe"
-                    
-                    logging.info(f"Updating yt-dlp to version {latest_version}...")
-                    
-                    # Download new version to temp file
-                    temp_path = ytdlp_path + ".tmp"
+                    result = subprocess.run(
+                        [ytdlp_path, "--version"],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        **self._popen_kwargs_hidden()
+                    )
+                    if result.returncode == 0:
+                        current_version = result.stdout.strip()
+                except Exception as e:
+                    logging.warning(f"Could not get current yt-dlp version: {e}")
+
+                response = requests.get("https://api.github.com/repos/yt-dlp/yt-dlp/releases/latest", timeout=10)
+                response.raise_for_status()
+                release_data = response.json()
+                tag = release_data.get("tag_name", "")
+                latest_version = tag.lstrip("v")
+                if not latest_version:
+                    raise RuntimeError("No se pudo determinar la última versión de yt-dlp.")
+
+                if current_version == latest_version:
+                    ok = True
+                    message = f"yt-dlp ya está en la última versión ({latest_version})."
+                else:
+                    download_url = next(
+                        (a.get("browser_download_url") for a in release_data.get("assets", []) if a.get("name") == "yt-dlp.exe"),
+                        f"https://github.com/yt-dlp/yt-dlp/releases/download/{tag}/yt-dlp.exe"
+                    )
                     download_response = requests.get(download_url, stream=True, timeout=60)
                     download_response.raise_for_status()
-                    
                     with open(temp_path, "wb") as f:
                         for chunk in download_response.iter_content(chunk_size=8192):
                             if chunk:
                                 f.write(chunk)
-                    
-                    # Replace old version with new one
-                    if os.path.exists(ytdlp_path):
-                        try:
-                            os.remove(ytdlp_path + ".old")
-                        except:
-                            pass
-                        os.rename(ytdlp_path, ytdlp_path + ".old")
-                    
-                    os.rename(temp_path, ytdlp_path)
-                    
-                    # Clean up
-                    try:
-                        os.remove(ytdlp_path + ".old")
-                    except:
-                        pass
-                    
-                    logging.info(f"yt-dlp updated successfully to {latest_version}")
-                    
-                except requests.exceptions.RequestException as e:
-                    logging.warning(f"Could not check for yt-dlp updates (network error): {e}")
-                except Exception as e:
-                    logging.error(f"Error updating yt-dlp: {e}")
-                    # Clean up temp file if exists
-                    try:
-                        if os.path.exists(temp_path):
-                            os.remove(temp_path)
-                    except:
-                        pass
-                    
+
+                    check = subprocess.run(
+                        [temp_path, "--version"],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                        **self._popen_kwargs_hidden()
+                    )
+                    if check.returncode != 0:
+                        raise RuntimeError("El archivo descargado de yt-dlp no funciona.")
+
+                    os.replace(temp_path, ytdlp_path)
+                    ok = True
+                    message = f"yt-dlp actualizado: {current_version or 'no instalado'} -> {latest_version}"
+                logging.info(message)
+            except requests.exceptions.RequestException as e:
+                message = f"No se pudo conectar para actualizar yt-dlp: {e}"
+                logging.warning(message)
+            except PermissionError as e:
+                message = "yt-dlp está en uso. Cierra las descargas en curso e inténtalo de nuevo."
+                logging.error(f"{message} ({e})")
             except Exception as e:
-                logging.error(f"Unexpected error in yt-dlp update check: {e}")
-        
-        threading.Thread(target=_update_check, daemon=True).start()
+                message = f"Error al actualizar yt-dlp: {e}"
+                logging.error(message)
+            finally:
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        os.remove(temp_path)
+                    except OSError:
+                        pass
+            if on_done:
+                self.master.after(0, lambda: on_done(ok, message))
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def open_download_folder(self):
         """Open the download folder"""
@@ -918,7 +900,7 @@ class YouTubeDownloader:
         video_quality = self.var_video_quality.get()
 
         # Base command
-        comando = ["yt-dlp", "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"]
+        comando = [self.get_ytdlp_path(), "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"]
 
         if video_format == 0:  # Audio Only
             comando.extend([
@@ -1003,7 +985,7 @@ class YouTubeDownloader:
             # If audio only is selected and keep_video is True, make a copy of the video
             if video_format == 0 and keep_video:
                 video_comando = [
-                    "yt-dlp",
+                    self.get_ytdlp_path(),
                     "--js-runtimes", "node",
                     "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
                     "-f",
@@ -1078,7 +1060,7 @@ class YouTubeDownloader:
                     startupinfo.wShowWindow = subprocess.SW_HIDE
 
                 result = subprocess.run(
-                    ["yt-dlp", "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "--flat-playlist", "-J", link],
+                    [self.get_ytdlp_path(), "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "--flat-playlist", "-J", link],
                     capture_output=True,
                     text=True,
                     check=True,
@@ -1115,7 +1097,7 @@ class YouTubeDownloader:
                         startupinfo_metadata.wShowWindow = subprocess.SW_HIDE
 
                     video_result = subprocess.run(
-                        ["yt-dlp", "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "-J", video_url],
+                        [self.get_ytdlp_path(), "--js-runtimes", "node", "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "-J", video_url],
                         capture_output=True,
                         text=True,
                         check=True,

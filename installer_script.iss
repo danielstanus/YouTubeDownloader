@@ -4,7 +4,7 @@
 [Setup]
 AppId={{C7A4E3B1-D2B9-487D-9A6A-13A6A4DA43F8}
 AppName=YouTube Downloader by DS
-AppVersion=1.0.0
+AppVersion=1.0.1
 AppPublisher=Daniel Calin Stanus
 AppPublisherURL=https://github.com/danielstanus/YouTubeDownloader
 AppSupportURL=https://github.com/danielstanus/YouTubeDownloader
@@ -13,7 +13,7 @@ DefaultDirName={autopf}\YouTubeDownloaderDS
 DisableProgramGroupPage=yes
 ; El instalador final se guardará en la carpeta Output del proyecto
 OutputDir=C:\YTDS\DS_YouTubeDownloader_Simple\installer_output
-OutputBaseFilename=YouTube_Downloader_DS_v1.0.0_Setup
+OutputBaseFilename=YouTube_Downloader_DS_v1.0.1_Setup
 SetupIconFile=C:\YTDS\DS_YouTubeDownloader_Simple\logo.ico
 Compression=lzma
 SolidCompression=yes
