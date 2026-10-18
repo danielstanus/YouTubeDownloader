@@ -3,6 +3,7 @@ import subprocess
 import shutil
 import sys
 import threading
+from version import APP_VERSION
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -19,7 +20,7 @@ from collections import deque
 
 
 class YouTubeDownloader:
-    VERSION = "v1.0.1"
+    VERSION = f"v{APP_VERSION}"
     YTDLP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
 
     def __init__(self, master):
@@ -70,6 +71,10 @@ class YouTubeDownloader:
         # Check and install FFmpeg in a background thread to not block UI
         threading.Thread(target=self.check_and_install_ffmpeg, daemon=True).start()
 
+        self._cancel_event = threading.Event()
+        self._active_processes = []
+        self._process_lock = threading.Lock()
+
         # Check and update yt-dlp automatically on startup (background thread)
         self._update_ytdlp_exe()
 
@@ -87,12 +92,18 @@ class YouTubeDownloader:
         if shutil.which("node"):
             return
         logging.warning("Node.js not found in PATH")
-        self.log_to_console("⚠ Node.js no encontrado: algunos vídeos pueden fallar.")
+        self.log_to_console("⚠ Node.js not found: some videos may fail.")
         messagebox.showwarning(
-            "Node.js no encontrado",
-            "No se encontró Node.js en este equipo. Algunos vídeos de YouTube pueden fallar sin él.\n\n"
-            "Instálalo desde https://nodejs.org para evitar errores de descarga."
+            "Node.js not found",
+            "Node.js was not found on this computer. Some YouTube videos may fail without it.\n\n"
+            "Install it from https://nodejs.org to avoid download errors."
         )
+
+    def _default_download_dir(self):
+        """
+        Default download folder: the user's Downloads folder.
+        """
+        return os.path.join(os.path.expanduser("~"), "Downloads", "DS_YouTubeDownloader")
 
     def _get_app_data_dir(self):
         """
@@ -153,8 +164,7 @@ class YouTubeDownloader:
             command=self.browse_folder
         ).pack(side="left")
 
-        # Fixed default download folder
-        default_folder = r"C:\DS_YouTubeDownloader"
+        default_folder = self._default_download_dir()
         os.makedirs(default_folder, exist_ok=True)
         self.entrada_carpeta.insert(0, default_folder)
 
@@ -319,6 +329,15 @@ class YouTubeDownloader:
         )
         self.download_button.pack(side="left", expand=True)
 
+        # Cancel Button (enabled only while downloads are running)
+        self.cancel_button = ttk.Button(
+            buttons_frame,
+            text="⛔ Cancel",
+            command=self.cancel_downloads,
+            state="disabled"
+        )
+        self.cancel_button.pack(side="left", padx=(10, 0))
+
         # Downloaded Songs Treeview
         songs_frame = ttk.Frame(main_frame)
         songs_frame.pack(fill="both", expand=True, pady=(10, 0))
@@ -456,6 +475,45 @@ class YouTubeDownloader:
             self.download_button.configure(state=state)
         except Exception:
             pass
+        try:
+            self.cancel_button.configure(state="disabled" if enabled else "normal")
+        except Exception:
+            pass
+
+    def _register_process(self, process):
+        with self._process_lock:
+            self._active_processes.append(process)
+
+    def _unregister_process(self, process):
+        with self._process_lock:
+            if process in self._active_processes:
+                self._active_processes.remove(process)
+
+    def cancel_downloads(self):
+        """
+        Stop all running yt-dlp processes and skip the downloads that have not started.
+        """
+        self._cancel_event.set()
+        self.log_to_console("--- Cancelling downloads ---")
+        self._ui_set_progress(text="Cancelling downloads...")
+
+        with self._process_lock:
+            processes = list(self._active_processes)
+        for process in processes:
+            self._kill_process_tree(process)
+
+    def _kill_process_tree(self, process):
+        try:
+            if os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(process.pid)],
+                    capture_output=True,
+                    **self._popen_kwargs_hidden()
+                )
+            else:
+                process.kill()
+        except Exception as e:
+            logging.warning(f"Could not stop process {process.pid}: {e}")
 
     def _show_busy(self, title: str, message: str):
         """
@@ -485,7 +543,7 @@ class YouTubeDownloader:
             self._busy_bar.pack(padx=16, pady=(0, 10), fill="x")
             self._busy_bar.start(12)
 
-            ttk.Label(self._busy_window, text="(No cierres la app)", foreground="#888888").pack(
+            ttk.Label(self._busy_window, text="(Do not close the app)", foreground="#888888").pack(
                 padx=16, pady=(0, 12), anchor="w"
             )
 
@@ -795,11 +853,11 @@ class YouTubeDownloader:
                 tag = release_data.get("tag_name", "")
                 latest_version = tag.lstrip("v")
                 if not latest_version:
-                    raise RuntimeError("No se pudo determinar la última versión de yt-dlp.")
+                    raise RuntimeError("Could not determine the latest yt-dlp version.")
 
                 if current_version == latest_version:
                     ok = True
-                    message = f"yt-dlp ya está en la última versión ({latest_version})."
+                    message = f"yt-dlp is already up to date ({latest_version})."
                 else:
                     download_url = next(
                         (a.get("browser_download_url") for a in release_data.get("assets", []) if a.get("name") == "yt-dlp.exe"),
@@ -820,20 +878,20 @@ class YouTubeDownloader:
                         **self._popen_kwargs_hidden()
                     )
                     if check.returncode != 0:
-                        raise RuntimeError("El archivo descargado de yt-dlp no funciona.")
+                        raise RuntimeError("The downloaded yt-dlp file does not work.")
 
                     os.replace(temp_path, ytdlp_path)
                     ok = True
-                    message = f"yt-dlp actualizado: {current_version or 'no instalado'} -> {latest_version}"
+                    message = f"yt-dlp updated: {current_version or 'not installed'} -> {latest_version}"
                 logging.info(message)
             except requests.exceptions.RequestException as e:
-                message = f"No se pudo conectar para actualizar yt-dlp: {e}"
+                message = f"Could not connect to update yt-dlp: {e}"
                 logging.warning(message)
             except PermissionError as e:
-                message = "yt-dlp está en uso. Cierra las descargas en curso e inténtalo de nuevo."
+                message = "yt-dlp is in use. Close any running downloads and try again."
                 logging.error(f"{message} ({e})")
             except Exception as e:
-                message = f"Error al actualizar yt-dlp: {e}"
+                message = f"Error updating yt-dlp: {e}"
                 logging.error(message)
             finally:
                 if temp_path and os.path.exists(temp_path):
@@ -850,7 +908,7 @@ class YouTubeDownloader:
         """Open the download folder"""
         carpeta = self.entrada_carpeta.get().strip()
         if not carpeta:
-            carpeta = r"C:\DS_YouTubeDownloader"
+            carpeta = self._default_download_dir()
 
         try:
             # Use the appropriate method based on the operating system
@@ -984,6 +1042,7 @@ class YouTubeDownloader:
                 **self._popen_kwargs_hidden()
             )
 
+            self._register_process(process)
             current_filepath = None
 
             # Read output in real-time
@@ -1004,9 +1063,10 @@ class YouTubeDownloader:
                     current_filepath = dest_match.group(1)
 
             process.wait()
+            self._unregister_process(process)
 
             # If audio only is selected and keep_video is True, make a copy of the video
-            if video_format == 0 and keep_video:
+            if video_format == 0 and keep_video and not self._cancel_event.is_set():
                 video_comando = self._ytdlp_base_command() + [
                     "-f",
                     f"bestvideo[height<={video_quality}]+bestaudio/best[height<={video_quality}]" if video_quality != "max" else "bestvideo+bestaudio/best",
@@ -1014,15 +1074,21 @@ class YouTubeDownloader:
                     enlace
                 ]
                 
-                subprocess.Popen(
+                video_process = subprocess.Popen(
                     video_comando,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     text=True,
                     **self._popen_kwargs_hidden()
                 )
+                self._register_process(video_process)
 
-            if process.returncode == 0:
+            if self._cancel_event.is_set():
+                self.master.after(0, lambda:
+                self.update_download_status(display_name, '⛔ Cancelled', '')
+                                  )
+                self._ui_set_progress(text=f"Cancelled: {display_name}")
+            elif process.returncode == 0:
                 self.master.after(0, lambda:
                 self.update_download_status(display_name, '✅ Complete', current_filepath or '')
                                   )
@@ -1068,7 +1134,7 @@ class YouTubeDownloader:
                 continue
 
             try:
-                self.log_to_console(f"[INFO] Analizando: {link}")
+                self.log_to_console(f"[INFO] Analyzing: {link}")
                 # Print diagnostic information
                 print(f"Processing link: {link}")
 
@@ -1097,11 +1163,11 @@ class YouTubeDownloader:
                 if 'entries' in data:
                     entries = data['entries']
                     print(f"Playlist detected: {len(entries)} entries")
-                    self.log_to_console(f"[INFO] Playlist detectada: {len(entries)} elemento(s)")
+                    self.log_to_console(f"[INFO] Playlist detected: {len(entries)} item(s)")
                 else:
                     entries = [data]
                     print("Single video detected")
-                    self.log_to_console("[INFO] Vídeo único detectado")
+                    self.log_to_console("[INFO] Single video detected")
 
                 for entry in entries:
                     video_url = entry.get('url', entry.get('id', ''))
@@ -1130,7 +1196,7 @@ class YouTubeDownloader:
                     artist = metadata.get('uploader', 'Unknown Artist').strip()
 
                     print(f"Found video: {title} by {artist}")
-                    self.log_to_console(f"[INFO] Encontrado: {title} - {artist}")
+                    self.log_to_console(f"[INFO] Found: {title} - {artist}")
 
                     validated_links.append({
                         'link': video_url,
@@ -1148,7 +1214,7 @@ class YouTubeDownloader:
             except json.JSONDecodeError as e:
                 print(f"JSON decoding error: {e}")
                 logging.error(f"Invalid JSON response for {link}")
-                self.log_to_console("[ERROR] Respuesta JSON inválida al obtener metadatos")
+                self.log_to_console("[ERROR] Invalid JSON response while fetching metadata")
                 self.show_error(f"Could not parse metadata for {link}")
             except Exception as e:
                 print(f"Unexpected error: {e}")
@@ -1170,6 +1236,7 @@ class YouTubeDownloader:
 
     def iniciar_descarga(self):
         # Reset UI elements (main thread)
+        self._cancel_event.clear()
         self.error_label.configure(text="")
         for item in self.songs_tree.get_children():
             self.songs_tree.delete(item)
@@ -1177,7 +1244,7 @@ class YouTubeDownloader:
         # Get inputs
         enlaces_raw = self.entrada_enlaces.get("1.0", tk.END).strip().split('\n')
         raw_links = [link.strip() for link in enlaces_raw if link.strip()]
-        carpeta = self.entrada_carpeta.get().strip() or r"C:\DS_YouTubeDownloader"
+        carpeta = self.entrada_carpeta.get().strip() or self._default_download_dir()
 
         if not raw_links:
             self.show_error("Please paste at least one YouTube link.")
@@ -1185,7 +1252,7 @@ class YouTubeDownloader:
 
         self._set_controls_enabled(False)
         self._ui_set_progress(value=0, text="Preparing downloads...")
-        self._show_busy("Procesando", "Analizando enlaces y obteniendo metadatos...")
+        self._show_busy("Processing", "Analyzing links and fetching metadata...")
 
         def _prepare_and_start():
             try:
@@ -1208,13 +1275,15 @@ class YouTubeDownloader:
                 metadatos = self.var_metadatos.get() == 1
                 miniatura = self.var_miniatura.get() == 1
 
-                self._update_busy(f"Iniciando descargas ({len(enlaces)} elemento(s))...")
+                self._update_busy(f"Starting downloads ({len(enlaces)} item(s))...")
 
                 # Semaphore to limit concurrent downloads
                 download_semaphore = threading.Semaphore(3)
 
                 def download_wrapper(link_info):
                     with download_semaphore:
+                        if self._cancel_event.is_set():
+                            return
                         self.download_thread(link_info, carpeta, formato, calidad, metadatos, miniatura)
 
                 def download_worker():
@@ -1227,8 +1296,11 @@ class YouTubeDownloader:
                     for thread in threads:
                         thread.join()
 
-                    self.master.after(0, lambda: messagebox.showinfo("Download", "All downloads completed"))
-                    self.master.after(0, lambda: self._ui_set_progress(text="All downloads completed."))
+                    if self._cancel_event.is_set():
+                        self.master.after(0, lambda: self._ui_set_progress(text="Downloads cancelled."))
+                    else:
+                        self.master.after(0, lambda: messagebox.showinfo("Download", "All downloads completed"))
+                        self.master.after(0, lambda: self._ui_set_progress(text="All downloads completed."))
                     self.master.after(0, self._hide_busy)
                     self.master.after(0, lambda: self._set_controls_enabled(True))
 

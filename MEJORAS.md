@@ -28,6 +28,8 @@ Lista de mejoras detectadas al revisar el código tras la versión 1.0.1.
 
 ## Usabilidad
 
+> Estado: puntos 5 a 8 implementados en la rama `mejoras-prioridad-alta`, pendientes de prueba. La interfaz y el instalador ahora están en inglés. Los comentarios del código siguen en español.
+
 ### 5. Botón de cancelar descarga
 - **Problema:** si una descarga se atasca o es por error, no hay forma de pararla desde la interfaz.
 - **Nota:** no se ha verificado si ya existe alguna forma de cancelar. Confirmar antes de implementar.
