@@ -19,6 +19,10 @@ import requests
 from collections import deque
 
 
+class DownloadCancelled(Exception):
+    pass
+
+
 class YouTubeDownloader:
     VERSION = f"v{APP_VERSION}"
     YTDLP_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36"
@@ -489,13 +493,42 @@ class YouTubeDownloader:
             if process in self._active_processes:
                 self._active_processes.remove(process)
 
+    def _run_ytdlp_capture(self, command):
+        """
+        Run a yt-dlp command and return its stdout. It can be stopped with cancel_downloads().
+        """
+        if self._cancel_event.is_set():
+            raise DownloadCancelled()
+
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            **self._popen_kwargs_hidden()
+        )
+        self._register_process(process)
+        if self._cancel_event.is_set():
+            self._kill_process_tree(process)
+        try:
+            stdout, stderr = process.communicate()
+        finally:
+            self._unregister_process(process)
+
+        if self._cancel_event.is_set():
+            raise DownloadCancelled()
+        if process.returncode != 0:
+            raise subprocess.CalledProcessError(process.returncode, command, output=stdout, stderr=stderr)
+        return stdout
+
     def cancel_downloads(self):
         """
         Stop all running yt-dlp processes and skip the downloads that have not started.
         """
         self._cancel_event.set()
-        self.log_to_console("--- Cancelling downloads ---")
-        self._ui_set_progress(text="Cancelling downloads...")
+        self.log_to_console("--- Cancelling ---")
+        self._update_busy("Cancelling...")
+        self._ui_set_progress(text="Cancelling...")
 
         with self._process_lock:
             processes = list(self._active_processes)
@@ -529,10 +562,10 @@ class YouTubeDownloader:
 
             self._busy_window = tk.Toplevel(self.master)
             self._busy_window.title(title)
-            self._busy_window.geometry("420x140")
+            self._busy_window.geometry("420x190")
             self._busy_window.transient(self.master)
             self._busy_window.resizable(False, False)
-            self._busy_window.protocol("WM_DELETE_WINDOW", lambda: None)
+            self._busy_window.protocol("WM_DELETE_WINDOW", self.cancel_downloads)
 
             self._busy_message_var = tk.StringVar(value=message)
             ttk.Label(self._busy_window, textvariable=self._busy_message_var, font=("Helvetica", 11)).pack(
@@ -543,9 +576,11 @@ class YouTubeDownloader:
             self._busy_bar.pack(padx=16, pady=(0, 10), fill="x")
             self._busy_bar.start(12)
 
-            ttk.Label(self._busy_window, text="(Do not close the app)", foreground="#888888").pack(
-                padx=16, pady=(0, 12), anchor="w"
+            ttk.Label(self._busy_window, text="(Press Cancel or close this window to stop)", foreground="#888888").pack(
+                padx=16, pady=(0, 8), anchor="w"
             )
+
+            ttk.Button(self._busy_window, text="⛔ Cancel", command=self.cancel_downloads).pack(pady=(0, 12))
 
             try:
                 self._busy_window.grab_set()
@@ -1139,25 +1174,12 @@ class YouTubeDownloader:
                 print(f"Processing link: {link}")
 
                 # Flat playlist extraction
-                startupinfo = None
-                if os.name == 'nt':
-                    startupinfo = subprocess.STARTUPINFO()
-                    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    startupinfo.wShowWindow = subprocess.SW_HIDE
-
-                result = subprocess.run(
-                    self._ytdlp_base_command() + ["--flat-playlist", "-J", link],
-                    capture_output=True,
-                    text=True,
-                    check=True,
-                    startupinfo=startupinfo,
-                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                )
+                stdout = self._run_ytdlp_capture(self._ytdlp_base_command() + ["--flat-playlist", "-J", link])
 
                 # Print raw JSON for debugging
-                print("Raw JSON:", result.stdout)
+                print("Raw JSON:", stdout)
 
-                data = json.loads(result.stdout)
+                data = json.loads(stdout)
 
                 # Handle both single video and playlist
                 if 'entries' in data:
@@ -1176,21 +1198,7 @@ class YouTubeDownloader:
                         continue
 
                     # Detailed video metadata
-                    startupinfo_metadata = None
-                    if os.name == 'nt':
-                        startupinfo_metadata = subprocess.STARTUPINFO()
-                        startupinfo_metadata.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        startupinfo_metadata.wShowWindow = subprocess.SW_HIDE
-
-                    video_result = subprocess.run(
-                        self._ytdlp_base_command() + ["-J", video_url],
-                        capture_output=True,
-                        text=True,
-                        check=True,
-                        startupinfo=startupinfo_metadata,
-                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
-                    )
-                    metadata = json.loads(video_result.stdout)
+                    metadata = json.loads(self._run_ytdlp_capture(self._ytdlp_base_command() + ["-J", video_url]))
 
                     title = metadata.get('title', 'Unknown Title').strip()
                     artist = metadata.get('uploader', 'Unknown Artist').strip()
@@ -1204,6 +1212,9 @@ class YouTubeDownloader:
                         'artist': artist
                     })
 
+            except DownloadCancelled:
+                self.log_to_console("[INFO] Link analysis cancelled")
+                return []
             except subprocess.CalledProcessError as e:
                 print(f"Subprocess error: {e}")
                 print(f"Stderr: {e.stderr}")
@@ -1258,6 +1269,9 @@ class YouTubeDownloader:
             try:
                 # Validate links and get metadata (background thread)
                 enlaces = self.validate_youtube_links(raw_links)
+                if self._cancel_event.is_set():
+                    self.master.after(0, lambda: self._ui_set_progress(text="Cancelled."))
+                    return
                 if not enlaces:
                     self.master.after(0, lambda: self._ui_set_progress(text="No valid links found."))
                     return
