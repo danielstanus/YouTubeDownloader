@@ -1,4 +1,5 @@
 import os
+import hashlib
 import subprocess
 import shutil
 import sys
@@ -17,6 +18,25 @@ import winreg
 import zipfile
 import requests
 from collections import deque
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def expected_sha256(checksums_text, filename):
+    """
+    Return the SHA-256 listed for filename in a "hash  filename" checksums file.
+    """
+    for line in checksums_text.splitlines():
+        parts = line.strip().split()
+        if len(parts) >= 2 and parts[-1].lstrip("*") == filename:
+            return parts[0].lower()
+    return None
 
 
 class DownloadCancelled(Exception):
@@ -720,12 +740,23 @@ class YouTubeDownloader:
             try:
                 os.makedirs(ffmpeg_path, exist_ok=True)
                 url = 'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip'
-                response = requests.get(url, stream=True)
+                response = requests.get(url, stream=True, timeout=60)
+                response.raise_for_status()
                 zip_path = os.path.join(ffmpeg_path, 'ffmpeg.zip')
 
                 with open(zip_path, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
+
+                checksums_response = requests.get(
+                    'https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/checksums.sha256',
+                    timeout=30
+                )
+                checksums_response.raise_for_status()
+                expected = expected_sha256(checksums_response.text, 'ffmpeg-master-latest-win64-gpl.zip')
+                if not expected or sha256_file(zip_path) != expected:
+                    os.remove(zip_path)
+                    raise RuntimeError("Downloaded FFmpeg failed checksum verification. Installation cancelled.")
 
                 with zipfile.ZipFile(zip_path, 'r') as zip_ref:
                     for member in zip_ref.namelist():
@@ -904,6 +935,18 @@ class YouTubeDownloader:
                         for chunk in download_response.iter_content(chunk_size=8192):
                             if chunk:
                                 f.write(chunk)
+
+                    sums_url = next(
+                        (a.get("browser_download_url") for a in release_data.get("assets", []) if a.get("name") == "SHA2-256SUMS"),
+                        None
+                    )
+                    if not sums_url:
+                        raise RuntimeError("No checksum file found for this yt-dlp release. Update cancelled.")
+                    sums_response = requests.get(sums_url, timeout=10)
+                    sums_response.raise_for_status()
+                    expected = expected_sha256(sums_response.text, "yt-dlp.exe")
+                    if not expected or sha256_file(temp_path) != expected:
+                        raise RuntimeError("Downloaded yt-dlp failed checksum verification. Update cancelled.")
 
                     check = subprocess.run(
                         [temp_path, "--version"],
