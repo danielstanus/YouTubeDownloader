@@ -109,3 +109,6 @@ docs/
 
 # Unused assets kept locally
 old/
+
+# Local maintenance scripts
+scripts/
