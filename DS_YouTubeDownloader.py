@@ -148,9 +148,13 @@ class YouTubeDownloader:
         links_label = ttk.Label(main_frame, text="🔗 YouTube Links (one per line):", font=("Helvetica", 16))
         links_label.pack(anchor="w", pady=(0, 5))
 
+        # Row with the links box and the paste button
+        links_row = ttk.Frame(main_frame)
+        links_row.pack(fill="x", pady=(0, 10))
+
         # Container for Text area to simulate borders
-        text_container = tk.Frame(main_frame, bg="#333333", padx=1, pady=1)
-        text_container.pack(fill="x", pady=(0, 10))
+        text_container = tk.Frame(links_row, bg="#333333", padx=1, pady=1)
+        text_container.pack(side="left", fill="x", expand=True)
 
         # Add version label at bottom right of main frame
         version_label = ttk.Label(main_frame, text=self.VERSION, font=("Helvetica", 8), foreground="#666666")
@@ -171,6 +175,20 @@ class YouTubeDownloader:
             highlightcolor="#0078d4"  # Windows blue color when focused
         )
         self.entrada_enlaces.pack(fill="x")
+
+        ttk.Button(
+            links_row,
+            text="📋 Paste",
+            command=self.paste_links_from_clipboard
+        ).pack(side="left", padx=(10, 0), anchor="n")
+
+        self.links_menu = tk.Menu(self.master, tearoff=0, bg="#1c1c1c", fg="#ffffff")
+        self.links_menu.add_command(label="Cut", command=lambda: self.entrada_enlaces.event_generate("<<Cut>>"))
+        self.links_menu.add_command(label="Copy", command=lambda: self.entrada_enlaces.event_generate("<<Copy>>"))
+        self.links_menu.add_command(label="Paste", command=self.paste_links_from_clipboard)
+        self.links_menu.add_separator()
+        self.links_menu.add_command(label="Select All", command=self.select_all_links)
+        self.entrada_enlaces.bind("<Button-3>", self.show_links_menu)
 
         # Download Folder Section
         folder_frame = ttk.Frame(main_frame)
@@ -843,6 +861,31 @@ class YouTubeDownloader:
             logging.error(f"PATH update error: {e}")
             messagebox.showerror("PATH Update Error", str(e))
 
+
+    def show_links_menu(self, event):
+        self.entrada_enlaces.focus_set()
+        try:
+            self.links_menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            self.links_menu.grab_release()
+
+    def paste_links_from_clipboard(self):
+        try:
+            text = self.master.clipboard_get()
+        except tk.TclError:
+            return
+        self.entrada_enlaces.focus_set()
+        try:
+            start = self.entrada_enlaces.index("sel.first")
+            self.entrada_enlaces.delete("sel.first", "sel.last")
+            self.entrada_enlaces.mark_set(tk.INSERT, start)
+        except tk.TclError:
+            pass
+        self.entrada_enlaces.insert(tk.INSERT, text)
+
+    def select_all_links(self):
+        self.entrada_enlaces.focus_set()
+        self.entrada_enlaces.tag_add("sel", "1.0", "end-1c")
 
     def browse_folder(self):
         """Open folder selection dialog"""
