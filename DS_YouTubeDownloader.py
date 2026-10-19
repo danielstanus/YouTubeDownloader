@@ -1197,11 +1197,16 @@ class YouTubeDownloader:
                         print("No video URL found for entry")
                         continue
 
-                    # Detailed video metadata
-                    metadata = json.loads(self._run_ytdlp_capture(self._ytdlp_base_command() + ["-J", video_url]))
+                    # Use the data from the list when it is complete; ask yt-dlp only for missing fields
+                    title = entry.get('title')
+                    artist = entry.get('uploader')
+                    if not title or not artist:
+                        metadata = json.loads(self._run_ytdlp_capture(self._ytdlp_base_command() + ["-J", video_url]))
+                        title = title or metadata.get('title')
+                        artist = artist or metadata.get('uploader')
 
-                    title = metadata.get('title', 'Unknown Title').strip()
-                    artist = metadata.get('uploader', 'Unknown Artist').strip()
+                    title = (title or 'Unknown Title').strip()
+                    artist = (artist or 'Unknown Artist').strip()
 
                     print(f"Found video: {title} by {artist}")
                     self.log_to_console(f"[INFO] Found: {title} - {artist}")
