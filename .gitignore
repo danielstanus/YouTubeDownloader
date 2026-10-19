@@ -103,3 +103,6 @@ ENV/
 *.zip
 installer_output/
 *.exe
+
+# Local-only documents
+docs/
