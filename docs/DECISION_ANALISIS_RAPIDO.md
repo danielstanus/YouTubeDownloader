@@ -70,5 +70,5 @@ Empezar por la **opción C**. Da la mayor mejora con cambios moderados y no aume
 
 - [ ] A. No cambiar nada
 - [ ] B. Paralelo (3)
-- [ ] C. Datos de la lista, consulta extra solo si falta
+- [x] C. Datos de la lista, consulta extra solo si falta (implementada en v1.0.3; la prueba de velocidad fue positiva)
 - [ ] D. C + B
